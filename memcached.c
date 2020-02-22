@@ -320,6 +320,8 @@ static void settings_init(void) {
     settings.logger_watcher_buf_size = LOGGER_WATCHER_BUF_SIZE;
     settings.logger_buf_size = LOGGER_BUF_SIZE;
     settings.drop_privileges = false;
+    settings.thread_affinity = false; // =e
+    settings.thread_affinity_offset = 0; // =e
     settings.watch_enabled = true;
 #ifdef MEMCACHED_DEBUG
     settings.relaxed_privileges = false;
@@ -7582,6 +7584,8 @@ static void usage(void) {
 #endif
            "-d, --daemon              run as a daemon\n"
            "-r, --enable-coredumps    maximize core file limit\n"
+           "-Q                        set distinct cpu affinity for threads, round-robin\n"
+           "-O                        set cpu affinity offset, starts from this core (default: 0)\n"
            "-u, --user=<user>         assume identity of <username> (only when run as root)\n"
            "-m, --memory-limit=<num>  item memory in megabytes (default: %lu)\n"
            "-M, --disable-evictions   return error on memory exhausted instead of evicting\n"
@@ -8519,6 +8523,8 @@ int main (int argc, char **argv) {
           "r"   /* maximize core file limit */
           "v"   /* verbose */
           "d"   /* daemon mode */
+          "Q"   /* Thread Affinity */ // =e
+          "O:"   /* Affinity offset */ // =e
           "l:"  /* interface to listen on */
           "u:"  /* user identity to run as */
           "P:"  /* save PID in file */
@@ -8568,6 +8574,7 @@ int main (int argc, char **argv) {
         {"threads", required_argument, 0, 't'},
         {"enable-largepages", no_argument, 0, 'L'},
         {"max-reqs-per-event", required_argument, 0, 'R'},
+	{"affinity-offset", required_argument, 0, 'O'}, // =e add arg for affinity offset
         {"disable-cas", no_argument, 0, 'C'},
         {"listen-backlog", required_argument, 0, 'b'},
         {"protocol", required_argument, 0, 'B'},
@@ -8738,6 +8745,17 @@ int main (int argc, char **argv) {
             break;
         case 'b' :
             settings.backlog = atoi(optarg);
+            break;
+        // =e
+        case 'Q':
+            settings.thread_affinity = true;
+            break;
+        case 'O':
+            settings.thread_affinity_offset = atoi(optarg);
+            if (settings.thread_affinity_offset < 0) {
+                fprintf(stderr, "Core offset must be greater than 0 and less than number of cpus\n");
+                return 1;
+            }
             break;
         case 'B':
             protocol_specified = true;
@@ -9828,6 +9846,14 @@ int main (int argc, char **argv) {
 
     /* Initialize the uriencode lookup table. */
     uriencode_init();
+
+    // =e
+    cpu_set_t my_set;        /* Define your cpu_set bit mask. */
+    CPU_ZERO(&my_set);       /* Initialize it all to 0, i.e. no CPUs selected. */
+    CPU_SET(0, &my_set);     /* set the bit that represents core 7. */
+    sched_setaffinity(0, sizeof(cpu_set_t), &my_set); /* Set affinity of tihs process to */
+                                                    /* the defined mask, i.e. only 7. */
+    //
 
     /* enter the event loop */
     while (!stop_main_loop) {
